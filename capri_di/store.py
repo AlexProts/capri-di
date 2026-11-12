@@ -129,10 +129,10 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO outbox(dedup,text) VALUES(?,?)", (dedup, text))
 
-    def claim_message(self):
+    def claim_message(self, defer_scheduled_time=False):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM outbox WHERE state='pending' ORDER BY id LIMIT 1").fetchone()
+            row = db.execute("SELECT o.* FROM outbox o WHERE o.state='pending' AND (?=0 OR NOT EXISTS (SELECT 1 FROM jobs j WHERE o.dedup='job:'||j.id AND j.kind='time' AND j.origin='schedule')) ORDER BY o.id LIMIT 1", (int(defer_scheduled_time),)).fetchone()
             if row:
                 db.execute("UPDATE outbox SET state='sending' WHERE id=?", (row["id"],))
                 return dict(row)

@@ -24,14 +24,20 @@ class Config:
     time_interval: int
     test_hour: int
     bot_username: str = ""
+    time_quiet_start: int = 0
+    time_quiet_end: int = 8
 
     @classmethod
     def load(cls):
-        hours = tuple(int(v) for v in os.environ.get("DIGEST_HOURS", "9,20").split(","))
+        hours = tuple(int(v) for v in os.environ.get("DIGEST_HOURS", "18").split(","))
         interval = int(os.environ.get("TIME_INTERVAL_HOURS", "4"))
+        quiet_start = int(os.environ.get("TIME_QUIET_START", "0"))
+        quiet_end = int(os.environ.get("TIME_QUIET_END", "8"))
         test_hour = int(os.environ.get("TEST_SCAN_HOUR", "10"))
         if not hours or any(h not in range(24) for h in hours) or interval not in range(1, 25) or test_hour not in range(24):
             raise ValueError("Invalid schedule")
+        if quiet_start not in range(24) or quiet_end not in range(24):
+            raise ValueError("Invalid Time quiet hours")
         return cls(Path(os.environ.get("STATE_DIR", "state/shared")).resolve(),
                    int(os.environ.get("TELEGRAM_OWNER_ID", "0")),
                    os.environ.get("TELEGRAM_BOT_TOKEN", ""),
@@ -39,4 +45,4 @@ class Config:
                    os.environ.get("OPENROUTER_MODEL", ""),
                    flag("SCHEDULES_ENABLED"), flag("PROACTIVE_TESTS_ENABLED"),
                    flag("TIME_ENABLED"), hours, interval, test_hour,
-                   os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@"))
+                   os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@"), quiet_start, quiet_end)

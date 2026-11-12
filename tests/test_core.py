@@ -19,7 +19,7 @@ from capri_di.relevance import digest_result, relevant_record
 
 
 def config(root):
-    return Config(Path(root), 42, "fake", "fake", "fake/model", True, True, True, (9,20), 4, 10)
+    return Config(Path(root), 42, "fake", "fake", "fake/model", True, True, True, (18,), 4, 10)
 
 
 class CoreTests(unittest.TestCase):
@@ -83,12 +83,12 @@ class CoreTests(unittest.TestCase):
         self.assertIn("перезапустилась", self.store.claim_message()["text"])
 
     def test_schedule_uses_moscow_and_single_slot(self):
-        now = datetime(2026,11,12,6,3,tzinfo=ZoneInfo("UTC"))
+        now = datetime(2026,11,12,15,3,tzinfo=ZoneInfo("UTC"))
         schedule(self.config, self.store, now)
         schedule(self.config, self.store, now)
         self.assertEqual([j["kind"] for j in self.store.jobs()], ["lms"])
         schedule(self.config, self.store, datetime(2026,11,12,17,0,tzinfo=ZoneInfo("UTC")))
-        self.assertEqual(len(self.store.jobs()), 3)  # 20 MSK = LMS + Time
+        self.assertEqual(len(self.store.jobs()), 2)  # 18 MSK = LMS, 20 MSK = Time
 
     def test_only_owner_can_dispatch(self):
         capri = Capri(self.config, self.store, None)

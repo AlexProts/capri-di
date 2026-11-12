@@ -301,6 +301,12 @@ class Capri:
         return compact("\n".join(lines), 3800)
 
 
+def time_quiet(config, now):
+    hour = now.astimezone(MSK).hour
+    start, end = config.time_quiet_start, config.time_quiet_end
+    return start <= hour < end if start <= end else hour >= start or hour < end
+
+
 def schedule(config, store, now):
     store.schedule_reminders(now)
     if not config.schedules:
@@ -309,7 +315,7 @@ def schedule(config, store, now):
     slot = now.replace(minute=0, second=0, microsecond=0).isoformat()
     if now.hour in config.digest_hours:
         store.enqueue("lms", "Собери свежие учебные задачи и дедлайны для дайджеста", "schedule", f"lms:{slot}")
-    if config.time_enabled and now.hour % config.time_interval == 0:
+    if config.time_enabled and not time_quiet(config, now) and now.hour % config.time_interval == 0:
         store.enqueue("time", "Прочитай учебные каналы Time; верни новости и задачи с точными ссылками", "schedule", f"time:{slot}")
     if config.proactive_tests and now.hour == config.test_hour:
         store.enqueue("tests", "Проверь и пройди доступные незавершённые учебные тесты LMS. Подтверди результаты.", "schedule", f"tests:{slot}")

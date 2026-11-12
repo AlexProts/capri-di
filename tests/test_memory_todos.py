@@ -9,8 +9,9 @@ import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from capri_di.capri import Capri, schedule
+from capri_di.capri import Capri, schedule, time_quiet
 from capri_di.context import conversation_context, recall
+from capri_di.config import Config
 from capri_di.main import handle_update
 from capri_di.network import RemoteError
 from capri_di.store import Store
@@ -250,6 +251,43 @@ class MemoryTodoTests(unittest.TestCase):
         update = {"update_id": 1, "message": {"text": "/todo чужое", "from": {"id": 1}, "chat": {"id": 42, "type": "private"}}}
         handle_update(self.config, self.store, self.capri, update)
         self.assertEqual(self.store.todos(), [])
+
+    def test_daily_digest_hours_and_night_exclusion_across_full_day(self):
+        cfg = replace(self.config, proactive_tests=False)
+        for hour in range(24):
+            now = datetime(2026, 11, 12, hour, 15, tzinfo=ZoneInfo("Europe/Moscow"))
+            schedule(cfg, self.store, now)
+            schedule(cfg, self.store, now)  # Every polling pass remains idempotent.
+        jobs = self.store.jobs(20)
+        self.assertEqual(sum(j["kind"] == "lms" for j in jobs), 1)
+        self.assertEqual(sum(j["kind"] == "time" for j in jobs), 4)
+        self.assertEqual({j["dedup"] for j in jobs}, {
+            "lms:2026-11-12T18:00:00+03:00",
+            *(f"time:2026-11-12T{h:02}:00:00+03:00" for h in (8, 12, 16, 20))})
+        self.assertTrue(time_quiet(cfg, datetime(2026, 11, 12, 4, 59, tzinfo=ZoneInfo("UTC"))))
+        self.assertFalse(time_quiet(cfg, datetime(2026, 11, 12, 5, 0, tzinfo=ZoneInfo("UTC"))))
+
+    def test_shipped_schedule_overrides_old_hours_without_changing_test_policy(self):
+        schedule_file = Path(__file__).resolve().parents[1] / "deploy/digests.env"
+        overrides = dict(line.split("=", 1) for line in schedule_file.read_text().splitlines() if line and not line.startswith("#"))
+        with patch.dict("os.environ", {"DIGEST_HOURS": "9,20", "PROACTIVE_TESTS_ENABLED": "false", **overrides}, clear=True):
+            cfg = Config.load()
+        self.assertEqual(cfg.digest_hours, (18,))
+        self.assertTrue(cfg.schedules)
+        self.assertTrue(cfg.time_enabled)
+        self.assertFalse(cfg.proactive_tests)
+        self.assertEqual((cfg.time_interval, cfg.time_quiet_start, cfg.time_quiet_end), (4, 0, 8))
+
+    def test_delayed_scheduled_time_report_waits_until_morning_without_blocking_replies(self):
+        scheduled = self.store.enqueue("time", "Read", "schedule", "night")
+        manual = self.store.enqueue("time", "Read now", "telegram-owner", "manual")
+        self.store.queue_text("job:" + scheduled, "Late scheduled report")
+        self.store.queue_text("job:" + manual, "Requested report")
+        self.store.queue_text("reply:100", "Ordinary reply")
+        self.assertEqual(self.store.claim_message(defer_scheduled_time=True)["text"], "Requested report")
+        self.assertEqual(self.store.claim_message(defer_scheduled_time=True)["text"], "Ordinary reply")
+        self.assertIsNone(self.store.claim_message(defer_scheduled_time=True))
+        self.assertEqual(self.store.claim_message(defer_scheduled_time=False)["text"], "Late scheduled report")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import time
 
-from .capri import Capri, schedule
+from .capri import Capri, schedule, time_quiet
 from .config import Config
 from .network import OpenRouter, RemoteError, Telegram
 from .store import Store
@@ -47,6 +47,8 @@ def run_bot(config):
             try:
                 schedule(config, store, datetime.now().astimezone())
                 for job in store.unreported():
+                    if job["kind"] == "time" and job["origin"] == "schedule" and time_quiet(config, datetime.now().astimezone()):
+                        continue  # A late collection must not wake the owner overnight.
                     try:
                         report = capri.report(job)
                     except RemoteError as error:
@@ -54,7 +56,7 @@ def run_bot(config):
                         log.warning("Digest formatter unavailable for job %s: %s; using compact fallback", job["id"], error)
                         report = capri.fallback(job, json.loads(job["result"]))
                     store.queue_text("job:" + job["id"], report)
-                while item := store.claim_message():
+                while item := store.claim_message(defer_scheduled_time=time_quiet(config, datetime.now().astimezone())):
                     try:
                         mid = telegram.send_file(item["file_path"], item["text"]) if item["file_path"] else telegram.send(item["text"])
                         store.delivery(item["id"], "sent", mid)
