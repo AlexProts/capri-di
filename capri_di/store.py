@@ -60,6 +60,9 @@ class Store:
                 db.execute("ALTER TABLE outbox ADD COLUMN sent_at REAL")
             if "context" not in {r[1] for r in db.execute("PRAGMA table_info(jobs)")}:
                 db.execute("ALTER TABLE jobs ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
+            for column, default in (("parent_id", ""), ("permissions", "{}")):
+                if column not in {r[1] for r in db.execute("PRAGMA table_info(jobs)")}:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'")
             # Migrate once; deleting this note must not resurrect the legacy preference.
             if not db.execute("SELECT 1 FROM settings WHERE key='memory_migrated'").fetchone():
                 old = db.execute("SELECT value FROM settings WHERE key='preference'").fetchone()
@@ -78,19 +81,46 @@ class Store:
         finally:
             db.close()
 
-    def enqueue(self, kind, request, origin, dedup, context=None):
+    def enqueue(self, kind, request, origin, dedup, context=None, install_dependencies=False):
         if kind not in {"lms", "time", "homework", "tests", "submit"}:
             raise ValueError("Unknown job kind")
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO jobs(id,dedup,kind,request,origin,created,updated,context) VALUES(?,?,?,?,?,?,?,?)",
+            db.execute("INSERT OR IGNORE INTO jobs(id,dedup,kind,request,origin,created,updated,context,permissions) VALUES(?,?,?,?,?,?,?,?,?)",
                        (uuid.uuid4().hex[:12], dedup, kind, request, origin, time.time(), time.time(),
-                        json.dumps(context or {}, ensure_ascii=False)))
+                        json.dumps(context or {}, ensure_ascii=False), json.dumps({"install_dependencies": kind == "homework" and install_dependencies is True})))
             return db.execute("SELECT id FROM jobs WHERE dedup=?", (dedup,)).fetchone()[0]
+
+    def continue_homework(self, parent_id, request, dedup, context, install_dependencies=False):
+        if not isinstance(parent_id, str) or not isinstance(request, str) or not request.strip() or len(request) > 12000 or type(install_dependencies) is not bool:
+            raise ValueError("Нужны ID домашки и конкретное уточнение до 12000 символов")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            prior = db.execute("SELECT id FROM jobs WHERE dedup=?", (dedup,)).fetchone()
+            if prior:
+                return prior[0]
+            parent = db.execute("SELECT * FROM jobs WHERE id=?", (parent_id,)).fetchone()
+            if not parent or parent["kind"] != "homework":
+                raise ValueError("Продолжение доступно только для подготовки домашки; тесты и сдачи так не перезапускаются")
+            child = db.execute("SELECT id FROM jobs WHERE parent_id=? AND state IN ('queued','running') LIMIT 1", (parent_id,)).fetchone()
+            if child:
+                raise ValueError("Продолжение уже передано: " + child[0] + ". Новая задача не создана; проверь его статус.")
+            inherited = json.loads(parent["permissions"])
+            parent_context = json.loads(parent["context"])
+            if parent_context.get("assignment_url") and context.get("assignment_url") != parent_context["assignment_url"]:
+                inherited["install_dependencies"] = False
+            inherited["install_dependencies"] = inherited.get("install_dependencies") is True or install_dependencies
+            context = dict(context)
+            previous = parent_context.get("original_homework_request", parent["request"])
+            context["original_homework_request"] = previous
+            job_id = uuid.uuid4().hex[:12]
+            db.execute("INSERT INTO jobs(id,dedup,kind,request,origin,created,updated,context,parent_id,permissions) VALUES(?,?,'homework',?,'telegram-continuation',?,?,?,?,?)",
+                       (job_id, dedup, request, time.time(), time.time(), json.dumps(context, ensure_ascii=False), parent_id, json.dumps(inherited)))
+            return job_id
 
     def claim_job(self):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            job = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created LIMIT 1").fetchone()
+            job = db.execute("SELECT j.* FROM jobs j WHERE j.state='queued' AND (j.parent_id='' OR EXISTS (SELECT 1 FROM jobs p WHERE p.id=j.parent_id AND p.state NOT IN ('queued','running'))) ORDER BY j.created LIMIT 1").fetchone()
             if job:
                 db.execute("UPDATE jobs SET state='running', updated=? WHERE id=?", (time.time(), job["id"]))
                 return dict(job)

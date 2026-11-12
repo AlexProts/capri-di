@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from .store import Store
 from .relevance import relevant_record
+from .context import result_view
 
 PACKAGE = Path(__file__).parent
 
@@ -29,6 +30,31 @@ def safe_artifact(work, name):
     if file.stat().st_size > 20 * 1024 * 1024:
         raise ValueError("Artifact larger than 20 MiB")
     return file
+
+
+def copy_previous_work(source, destination, max_bytes=100 * 1024 * 1024):
+    """Copy only bounded regular task files, never environments, links or old policy."""
+    copied, omitted, size = [], [], 0
+    excluded = {"AGENTS.md", "result.json", "result-schema.json", "auth.json", "credentials.json", "storage-state.json", "browser.json", "config.toml"}
+    if not source.is_dir() or source.is_symlink():
+        raise ValueError("Previous workspace unavailable")
+    for folder, directories, files in os.walk(source, followlinks=False):
+        directories[:] = sorted(d for d in directories if not d.startswith(".") and d not in {"venv", "node_modules", "__pycache__"} and not (Path(folder) / d).is_symlink())
+        for name in sorted(files):
+            path = Path(folder) / name
+            relative = path.relative_to(source)
+            if name.startswith(".") or name in excluded:
+                continue
+            if path.is_symlink() or not path.is_file() or len(copied) >= 500 or size + path.stat().st_size > max_bytes:
+                if len(omitted) < 50:
+                    omitted.append(str(relative))
+                continue
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+            copied.append(str(relative))
+            size += path.stat().st_size
+    return {"directory": "previous/", "copied": copied, "omitted": omitted}
 
 
 def validate_result(result, kind):
@@ -81,6 +107,21 @@ class Worker:
                   "origin": job["origin"], "instruction": "Выполни только эту задачу по AGENTS.md. Верни JSON по схеме."}
         if job.get("context"):
             prompt["reference_context_data"] = json.loads(job["context"])
+            prompt["assignment_url"] = prompt["reference_context_data"].get("assignment_url", "")
+        prompt["permissions"] = {"install_dependencies": job["kind"] == "homework" and json.loads(job.get("permissions", "{}")).get("install_dependencies") is True,
+                                 "submit_homework": job["kind"] == "submit"}
+        if job.get("parent_id"):
+            parent = self.store.job(job["parent_id"])
+            if not parent or parent["kind"] != "homework" or job["kind"] != "homework" or parent["state"] in {"queued", "running"}:
+                return error_result("blocked", "Не удалось подтвердить исходную домашку для продолжения")
+            try:
+                files = copy_previous_work(self.root / parent["id"], work / "previous")
+            except (OSError, ValueError):
+                return error_result("blocked", "Прежняя рабочая папка недоступна; продолжение не запускал. Нужны исходные файлы.")
+            prompt["continuation"] = {"parent_job_id": parent["id"], "previous_result_data": result_view(parent),
+                                      "original_homework_request": json.loads(job["context"]).get("original_homework_request", parent["request"]),
+                                      "files": files,
+                                      "instruction": "Продолжи подготовку этой же домашки с учётом текущего user_request. Сначала прочитай прежнее решение и точное условие LMS; не подменяй задание похожим. Не прикрепляй и не сдавай. Финальные файлы положи в artifacts/ нового job."}
         if job["kind"] == "time":
             prompt["since_last_successful_collection"] = self.store.setting("time_collected_at")
         if job["kind"] == "submit":

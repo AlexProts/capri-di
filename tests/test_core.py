@@ -112,8 +112,9 @@ class CoreTests(unittest.TestCase):
 
     def test_duplicate_model_calls_do_not_duplicate_job(self):
         capri = Capri(self.config, self.store, None)
-        one = capri.tool("delegate", {"kind":"homework", "request":"x"}, 1)
-        two = capri.tool("delegate", {"kind":"homework", "request":"y"}, 1)
+        url = "https://my.centraluniversity.ru/learn/courses/view/actual/1/themes/2/longreads/3"
+        one = capri.tool("delegate", {"kind":"homework", "request":"x", "assignment_url":url}, 1)
+        two = capri.tool("delegate", {"kind":"homework", "request":"y", "assignment_url":url}, 1)
         self.assertEqual(one["job_id"], two["job_id"])
         self.assertEqual(len(self.store.jobs()), 1)
 

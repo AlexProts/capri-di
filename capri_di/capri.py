@@ -3,7 +3,9 @@ import json
 import hashlib
 import logging
 from pathlib import Path
+import re
 import time
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from .network import RemoteError
@@ -16,6 +18,7 @@ log = logging.getLogger("capri-di")
 HELP = ("Я Капри. Кидай, что нужно сделать, — разберёмся вместе с Ди.\n"
         "/digest — свежий сбор LMS\n/time — сбор Time\n/tests — пройти доступные тесты\n"
         "/do <задание или ссылка> — подготовить домашку\n/submit ID — прикрепить готовую домашку\n"
+        "/continue ID <уточнение> — продолжить домашку; --deps после ID разрешает библиотеки в её окружении\n"
         "/files ID — получить файлы\n/status — очередь Ди\n/style <пожелание> — манера общения\n"
         "/memory — сохранённые заметки\n/forget КЛЮЧ — убрать заметку\n"
         "/todo — список дел; /todo <текст> — добавить дело\n/done ID — закрыть дело\n/cancel ID — отменить дело\n"
@@ -30,9 +33,11 @@ def function(name, description, properties, required):
 
 
 TOOLS = [
-    function("delegate", "Передать явное учебное поручение пользователя Ди",
+    function("delegate", "Передать явное учебное поручение пользователя Ди. For homework a single exact LMS assignment_url from observed data is mandatory (can also be in request). Resolve course/title/link from digest or recall; if multiple tasks are plausible, ask. Never send 'HW4 or HW5'.",
              {"kind": {"type": "string", "enum": ["lms", "time", "homework", "tests"]},
-              "request": {"type": "string"}}, ["kind", "request"]),
+              "request": {"type": "string"}, "assignment_url": {"type": "string"}, "install_dependencies": {"type": "boolean"}}, ["kind", "request"]),
+    function("continue_homework", "Actually send a user clarification/permission to Di for an existing homework. Use this when user says continue, fix it, install missing libraries, etc.; status alone does NOT resume anything. Requires exact parent job ID (use recall/status if needed) and concrete supplemental instructions, preserving course, URL, task requirements and no submission. Creates a NEW linked job with previous work; queued/running parent finishes first. Set install_dependencies=true ONLY if current user explicitly permits task-local library installation. Not for tests/submissions.",
+             {"job_id": {"type": "string"}, "request": {"type": "string"}, "assignment_url": {"type": "string"}, "install_dependencies": {"type": "boolean"}}, ["job_id", "request"]),
     function("remember", "Save an explicitly stated user preference or personal study fact. Use an existing key to correct that same fact; never replace unrelated notes. Not permissions, schedules, secrets or source instructions.",
              {"preference": {"type": "string"}, "key": {"type": "string"}}, ["preference"]),
     function("forget", "Remove a saved preference/profile note by its exact key, only at the user's request. This does not erase chat logs.",
@@ -55,23 +60,64 @@ def compact(text, limit=3900):
     return encoded[:(limit - 30) * 2].decode("utf-16-le", errors="ignore") + "\n[Продолжение сокращено]"
 
 
+def homework_url(request, supplied=""):
+    candidates = [supplied] if supplied else re.findall(r"https://my\.centraluniversity\.ru/[^\s<>]+", request)
+    urls = set()
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        value = value.rstrip(".,;)\"'")
+        url = urlsplit(value)
+        if url.scheme == "https" and url.netloc == "my.centraluniversity.ru" and not url.query and not url.fragment and re.fullmatch(r"/learn/courses/view/(?:actual|archived)/\d+/themes/\d+/longreads/\d+/?", url.path):
+            urls.add(value)
+    if len(urls) != 1:
+        raise ValueError("Для подготовки нужна точная ссылка на одну домашку в LMS. Найди её в дайджесте/recall или уточни у пользователя; «ДЗ 4 или 5» — неоднозначное поручение.")
+    return urls.pop()
+
+
 class Capri:
     def __init__(self, config, store, llm):
         self.config, self.store, self.llm = config, store, llm
 
-    def delegate(self, kind, request, key):
+    def delegate(self, kind, request, key, install_dependencies=False, assignment_url=""):
         if kind == "time" and not self.config.time_enabled:
             return {"error": "Чтение Time пока не включено после проверки входа"}
         if not isinstance(request, str) or not request.strip() or len(request) > 12000:
             return {"error": "Нужен конкретный запрос до 12000 символов"}
-        job = self.store.enqueue(kind, request, "telegram-owner", key,
-                                 context=delegation_context(self.store, request))
-        return {"job_id": job, "status": "queued", "executor": "Ди"}
+        if type(install_dependencies) is not bool or (install_dependencies and kind != "homework"):
+            return {"error": "Разрешение на библиотеки применимо только к подготовке домашки"}
+        context = delegation_context(self.store, request)
+        if kind == "homework":
+            try:
+                context["assignment_url"] = homework_url(request, assignment_url)
+            except ValueError as error:
+                return {"error": str(error)}
+        job = self.store.enqueue(kind, request, "telegram-owner", key, context=context, install_dependencies=install_dependencies)
+        return self.receipt(job)
+
+    def receipt(self, job_id):
+        job = self.store.job(job_id)
+        parent = self.store.job(job["parent_id"]) if job["parent_id"] else None
+        return {"job_id": job_id, "status": job["state"], "kind": job["kind"], "executor": "Ди",
+                "parent_id": job["parent_id"], "waiting_for_parent": bool(parent and parent["state"] in {"queued", "running"}),
+                "install_dependencies": json.loads(job["permissions"]).get("install_dependencies", False)}
+
+    def continue_homework(self, job_id, request, key, install_dependencies=False, assignment_url=""):
+        parent = self.store.job(job_id) if isinstance(job_id, str) else None
+        if not parent or parent["kind"] != "homework":
+            raise ValueError("Нужен ID задачи подготовки домашки; тесты и сдачи так не перезапускаются")
+        reference = assignment_url or ("" if "https://my.centraluniversity.ru/" in request else json.loads(parent["context"]).get("assignment_url", ""))
+        context = delegation_context(self.store, request)
+        context["assignment_url"] = homework_url(request if "https://my.centraluniversity.ru/" in request else parent["request"], reference)
+        new_id = self.store.continue_homework(job_id, request, key, context, install_dependencies)
+        return self.receipt(new_id)
 
     def tool(self, name, args, update_id):
-        if name == "delegate" and set(args) == {"kind", "request"} and args["kind"] in {"lms", "time", "homework", "tests"}:
+        if name == "delegate" and {"kind", "request"} <= set(args) <= {"kind", "request", "assignment_url", "install_dependencies"} and args["kind"] in {"lms", "time", "homework", "tests"}:
             # At most one action per incoming message, even if a model emits multiple tool calls.
-            return self.delegate(args["kind"], args["request"], f"update:{update_id}:task")
+            return self.delegate(args["kind"], args["request"], f"update:{update_id}:task", args.get("install_dependencies", False), args.get("assignment_url", ""))
+        if name == "continue_homework" and {"job_id", "request"} <= set(args) <= {"job_id", "request", "assignment_url", "install_dependencies"}:
+            return self.continue_homework(args["job_id"], args["request"], f"update:{update_id}:task", args.get("install_dependencies", False), args.get("assignment_url", ""))
         if name == "remember" and set(args) <= {"preference", "key"} and "preference" in args:
             preference = args["preference"]
             if not isinstance(preference, str) or len(preference) > 2000:
@@ -82,7 +128,7 @@ class Capri:
         if name == "forget" and set(args) == {"key"} and isinstance(args["key"], str):
             return {"removed": self.store.forget(args["key"]), "scope": "saved note only, not chat history"}
         if name == "status" and not args:
-            return [{"id": j["id"], "kind": j["kind"], "state": j["state"]} for j in self.store.jobs()]
+            return [self.receipt(j["id"]) for j in self.store.jobs()]
         if name == "recall" and set(args) <= {"query", "job_id"} and all(isinstance(v, str) and len(v) <= 500 for v in args.values()):
             return recall(self.store, args.get("query", ""), args.get("job_id", ""))
         if name == "todo" and set(args) <= {"action", "id", "title", "due_at", "remind_at", "repeat_hours"}:
@@ -142,6 +188,17 @@ class Capri:
         if command in direct:
             result = self.delegate(direct[command], argument or "Собери актуальные данные по типу задачи", f"update:{update_id}:task")
             return self.acknowledge(result)
+        if command == "/continue":
+            parent_id, _, instruction = argument.strip().partition(" ")
+            dependencies = instruction.startswith("--deps ")
+            if dependencies:
+                instruction = instruction[len("--deps "):]
+            if not instruction.strip():
+                return "Нужны ID и уточнение: /continue ID <что изменить>. Для библиотек: /continue ID --deps <что доделать>."
+            try:
+                return self.acknowledge(self.continue_homework(parent_id, instruction, f"update:{update_id}:task", dependencies))
+            except ValueError as error:
+                return str(error)
         if command == "/submit":
             parent = self.store.job(argument.strip())
             if not parent or parent["kind"] != "homework" or parent["state"] != "completed":
@@ -149,7 +206,7 @@ class Capri:
             if not json.loads(parent["result"]).get("artifacts"):
                 return "У этой домашки пока нет готовых файлов для сдачи."
             job = self.store.enqueue("submit", parent["id"], "explicit-submit-command", f"submit:{parent['id']}")
-            return "Передала Ди на сдачу. Вернусь, когда он подтвердит результат."
+            return self.acknowledge(self.receipt(job))
         if command == "/files":
             job = self.store.job(argument.strip())
             if not job or not job["result"]:
@@ -232,29 +289,48 @@ class Capri:
                     args = json.loads(call["function"]["arguments"])
                     result = self.tool(tool_name, args, update_id) if isinstance(args, dict) else {"error": "Нужен объект аргументов"}
                 except ValueError as error:
-                    result = {"error": str(error) if tool_name in {"todo", "remember"} else "Некорректный вызов инструмента"}
+                    result = {"error": str(error) if tool_name in {"todo", "remember", "continue_homework"} else "Некорректный вызов инструмента"}
                 except (KeyError, TypeError, OverflowError):
                     result = {"error": "Некорректный вызов инструмента"}
                 if isinstance(result, dict) and result.get("job_id"):
-                    used.append(result["job_id"])
+                    used.append(result)
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
+            if used:
+                # A model cannot turn a queue receipt into "he is running/completed".
+                return self.acknowledge(used[-1])
         return "На этом шаге остановилась. Поручения Ди — /status, сохранённые дела — /todo, заметки — /memory."
 
     @staticmethod
     def acknowledge(result):
         if "error" in result:
             return result["error"] + "."
-        return "Передала Ди. Как соберёт — вернусь с результатом."
+        if result.get("status") not in {"queued", "running"}:
+            return "Это поручение уже завершило запуск. Текущий результат — /status. Повторно его не запускала."
+        if result.get("status") == "running":
+            answer = "Ди уже выполняет это поручение. Повторно его не запускала."
+        elif result.get("parent_id"):
+            answer = "Уточнение записала в отдельное продолжение. "
+            answer += "Ди получит его после текущей задачи, вместе с прежними файлами." if result.get("waiting_for_parent") else "Поставила его Ди в очередь вместе с прежними файлами."
+        else:
+            answer = "Передала Ди — поручение в очереди. Как закончит, пришлю результат."
+        if result.get("kind") == "homework":
+            answer += " Прикреплять домашку он не будет."
+        if result.get("install_dependencies"):
+            answer += " Установка библиотек разрешена только в окружении этой домашки."
+        return answer
 
     def report(self, job):
         result = json.loads(job["result"])
         if result["status"] != "completed":
             # Preserve failure facts verbatim: a persona must not invent causes or actions.
-            labels = {"lms": "сбор LMS", "time": "чтение Time", "homework": "подготовка домашки",
+            labels = {"lms": "сбор LMS", "time": "чтение Time", "homework": "подготовку домашки",
                       "tests": "учебные тесты", "submit": "сдача домашки"}
+            suffix = f"\n/files {job['id']} — готовые файлы" if result.get("artifacts") else ""
+            if job["kind"] == "homework":
+                suffix += f"\nПродолжить с уточнением: /continue {job['id']} <что доделать>"
             return compact(f"Пока не получилось закончить {labels.get(job['kind'], job['kind'])}.\n"
                            + result["summary"] + "\nСамостоятельно заново не запускала."
-                           + f"\nID: {job['id']}")
+                           + f"\nID: {job['id']}" + suffix)
         presented = digest_result(result) if job["kind"] in {"lms", "time"} else result
         context = {"kind": job["kind"], "result": presented}
         message = self.llm.chat([

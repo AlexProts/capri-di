@@ -151,7 +151,7 @@ class MemoryTodoTests(unittest.TestCase):
 
     def test_di_receives_fixed_snapshot_even_if_conversation_changes(self):
         self.store.remember_message("user", "Нужна NLP ДЗ 3.2, только подготовить")
-        queued = self.capri.delegate("homework", "Подготовь эту домашку", "snapshot")
+        queued = self.capri.delegate("homework", "Подготовь эту домашку https://my.centraluniversity.ru/learn/courses/view/actual/1/themes/2/longreads/3", "snapshot")
         self.store.remember_message("user", "Теперь обсуждаем другое")
         job = self.store.claim_job()
         captured = json.loads(job["context"])
