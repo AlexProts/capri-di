@@ -1,0 +1,27 @@
+[Unit]
+Description=Di Codex executor with persistent browser
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=di
+Group=capri-di
+WorkingDirectory=/var/lib/capri-di/di
+Environment=HOME=/var/lib/capri-di/di
+Environment=PATH=/opt/capri-di/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/capri-di/di.env
+ExecStart=/opt/capri-di/.venv/bin/python -m capri_di.main di
+Restart=on-failure
+RestartSec=15
+KillMode=control-group
+TimeoutStopSec=20
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/capri-di/shared /var/lib/capri-di/di
+InaccessiblePaths=/var/lib/capri-di/capri /etc/capri-di/capri.env
+
+[Install]
+WantedBy=multi-user.target

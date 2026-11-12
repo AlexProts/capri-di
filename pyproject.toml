@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capri-di"
+version = "0.1.0"
+description = "Private Telegram study assistant: Capri via OpenRouter, Di via signed-in Codex CLI"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+capri-di = "capri_di.main:main"
+
+[tool.setuptools.packages.find]
+include = ["capri_di*"]
+
+[tool.setuptools.package-data]
+capri_di = ["prompts/*.md", "schemas/*.json"]

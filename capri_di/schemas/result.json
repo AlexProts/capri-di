@@ -1,0 +1,19 @@
+{
+  "type": "object", "additionalProperties": false,
+  "properties": {
+    "status": {"type":"string","enum":["completed","blocked","failed","unknown"]},
+    "summary": {"type":"string"}, "collected_at": {"type":"string"},
+    "records": {"type":"array","items":{
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "id":{"type":"string"},"source":{"type":"string","enum":["lms","time"]},
+        "title":{"type":"string"},"course":{"type":"string"},"status":{"type":"string"},
+        "due_at":{"type":"string"},"url":{"type":"string"},"details":{"type":"string"}
+      },"required":["id","source","title","course","status","due_at","url","details"]
+    }},
+    "artifacts":{"type":"array","items":{"type":"string"}},
+    "evidence":{"type":"array","items":{"type":"string"}},
+    "source_errors":{"type":"array","items":{"type":"string"}}
+  },
+  "required":["status","summary","collected_at","records","artifacts","evidence","source_errors"]
+}

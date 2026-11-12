@@ -1,0 +1,13 @@
+forced_login_method = "chatgpt"
+cli_auth_credentials_store = "file"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.browser]
+command = "/opt/capri-di/node_modules/.bin/playwright-mcp"
+args = ["--config", "/etc/capri-di/browser.json"]
+required = true
+startup_timeout_sec = 60
+
+[mcp_servers.browser.env]
+PLAYWRIGHT_BROWSERS_PATH = "/opt/capri-di/browsers"

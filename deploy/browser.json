@@ -1,0 +1,7 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "userDataDir": "/var/lib/capri-di/di/browser-profile",
+    "launchOptions": {"headless": true}
+  }
+}

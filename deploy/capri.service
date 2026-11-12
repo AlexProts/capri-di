@@ -1,0 +1,24 @@
+[Unit]
+Description=Capri Telegram and OpenRouter coordinator
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=capri
+Group=capri-di
+WorkingDirectory=/opt/capri-di
+Environment=HOME=/var/lib/capri-di/capri
+EnvironmentFile=/etc/capri-di/capri.env
+ExecStart=/opt/capri-di/.venv/bin/python -m capri_di.main capri
+Restart=on-failure
+RestartSec=15
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/capri-di/shared /var/lib/capri-di/capri
+InaccessiblePaths=/var/lib/capri-di/di /etc/capri-di/di.env
+
+[Install]
+WantedBy=multi-user.target

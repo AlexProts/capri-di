@@ -1,0 +1,10 @@
+{
+  "name": "capri-di-tools",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@openai/codex": "0.167.2",
+    "@playwright/mcp": "0.0.85",
+    "playwright": "1.66.0-alpha-2026-11-09"
+  }
+}

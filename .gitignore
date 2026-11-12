@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+*.db*
+state/
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.codex/
+browser-profile/
+auth.json
+*.log
+.DS_Store
+dist/
+*.egg-info/
