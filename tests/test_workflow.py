@@ -8,7 +8,7 @@ from capri_di.capri import Capri
 from capri_di.context import find_assignment
 from capri_di.network import OpenRouter, RemoteError
 from capri_di.store import Store
-from capri_di.selection import selected_assignment
+from capri_di.selection import selected_assignment, is_assignment_choice
 from capri_di.worker import error_result
 from test_core import config, routed
 
@@ -143,12 +143,17 @@ class WorkflowTests(unittest.TestCase):
 
     def test_legacy_pending_question_enriches_bare_number_with_original_request_and_exact_url(self):
         parent = self.seed(ambiguous=True)
-        self.store.set_setting("pending_workflow", json.dumps({"workflow": "conversation", "original_request": "отправишь ди задачу на рек сис?", "question": "ДЗ4 или ДЗ5?"}))
+        self.store.remember_message("user", "отправишь ди задачу на рек сис?")
+        self.store.remember_message("assistant", "ДЗ4 или ДЗ5?")
+        self.store.set_setting("pending_workflow", json.dumps({"workflow": "conversation", "original_request": "Покажи новости Time", "question": "ДЗ4 или ДЗ5?"}))
         with patch.object(self.llm, "chat", return_value=routed("continue_homework", {"job_id": parent, "request": "Подготовить ДЗ4 без прикрепления", "assignment_url": URL4})) as model:
             answer = self.capri.reply("4", 2)
         self.assertIn("очередь", answer)
         self.assertIn("resolved_assignment_selection", str(model.call_args.args[0]))
         self.assertIn(URL4, str(model.call_args.args[0]))
+        self.assertIn("отправишь ди задачу на рек сис?", str(model.call_args.args[0]))
+        router_tools = model.call_args.args[1][0]["function"]["parameters"]["properties"]["tool"]["enum"]
+        self.assertNotIn("find_assignment", router_tools)
 
     def test_numeric_choices_do_not_use_menu_position_or_choose_between_duplicate_task_numbers(self):
         candidates = [{"title": "ДЗ 4. Графовые сети", "url": URL4}, {"title": "ДЗ 5. Соревнование", "url": URL5}]
@@ -157,6 +162,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNone(selected_assignment(candidates, "1"))
         self.assertIsNone(selected_assignment(candidates, "через 4 часа"))
         self.assertIsNone(selected_assignment([*candidates, {"title": "ДЗ 4 NLP", "url": "another"}], "4"))
+
+    def test_time_clarification_does_not_turn_four_into_a_homework_selection(self):
+        self.assertFalse(is_assignment_choice({"workflow": "todo", "question": "Во сколько напомнить про ДЗ 4 или ДЗ 5?"}))
+        self.assertFalse(is_assignment_choice({"workflow": "conversation", "question": "Во сколько напомнить?"}))
+        self.assertTrue(is_assignment_choice({"workflow": "conversation", "question": "ДЗ4 или ДЗ5?"}))
 
     def test_preparation_of_same_assignment_reuses_legacy_work_instead_of_starting_over(self):
         parent = self.seed()

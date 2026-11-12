@@ -2,6 +2,15 @@
 import re
 
 
+def is_assignment_choice(pending):
+    if pending.get("action") in {"delegate_homework", "continue_homework"}:
+        return True
+    if pending.get("workflow") not in {"conversation", "new_homework", "continue_homework"}:
+        return False
+    numbers = re.findall(r"\b(?:дз|hw)\s*(\d+(?:\.\d+)*)", pending.get("question", ""), re.I)
+    return len(set(numbers)) > 1
+
+
 def selected_assignment(candidates, text):
     answer = text.strip().casefold().rstrip(".!?")
     ordinals = {"первую": "1", "вторую": "2", "третью": "3", "четвертую": "4", "четвёртую": "4",

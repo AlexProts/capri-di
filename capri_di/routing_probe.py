@@ -43,6 +43,9 @@ def main():
         assert len([j for j in store.jobs() if j["kind"] == "homework"]) == 1, "Must clarify ambiguous HW4/HW5 before execution"
         assert "/continue" not in question and "recall" not in question, "Internal instruction leaked"
         assert any(term in question.casefold() for term in ("4", "5", "граф", "соревн")), "Need a concrete assignment choice"
+        # Reproduce the older production record too: only a question survived,
+        # with an unrelated original request and no choices/action binding.
+        store.set_setting("pending_workflow", json.dumps({"workflow": "conversation", "original_request": "Покажи новости Time", "question": question}))
         accepted = capri.reply("4", 2)
         print(json.dumps({"probe_acceptance": accepted}, ensure_ascii=False), flush=True)
         children = [j for j in store.jobs() if j["parent_id"] == parent]
