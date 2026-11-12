@@ -17,7 +17,7 @@ from capri_di.worker import safe_artifact, validate_result, error_result, Worker
 
 
 def config(root):
-    return Config(Path(root), 123456789, "fake", "fake", "fake/model", True, True, True, (9,20), 4, 10)
+    return Config(Path(root), 42, "fake", "fake", "fake/model", True, True, True, (9,20), 4, 10)
 
 
 class CoreTests(unittest.TestCase):
@@ -75,10 +75,10 @@ class CoreTests(unittest.TestCase):
 
     def test_only_owner_can_dispatch(self):
         capri = Capri(self.config, self.store, None)
-        update = {"update_id": 5, "message": {"text": "/digest", "from": {"id":1}, "chat": {"id":123456789,"type":"private"}}}
+        update = {"update_id": 5, "message": {"text": "/digest", "from": {"id":1}, "chat": {"id":42,"type":"private"}}}
         handle_update(self.config, self.store, capri, update)
         self.assertEqual(self.store.jobs(), [])
-        update["message"]["from"]["id"] = 123456789
+        update["message"]["from"]["id"] = 42
         handle_update(self.config, self.store, capri, update)
         self.assertEqual(len(self.store.jobs()), 1)
 
@@ -166,6 +166,25 @@ class CoreTests(unittest.TestCase):
         report = capri.report(self.store.job(job_id))
         self.assertIn(job_id, report)
         self.assertEqual(len(self.store.jobs()), 1)
+
+    def test_digest_retains_user_language_across_commands(self):
+        class Provider:
+            def __init__(self):
+                self.messages = []
+            def chat(self, messages, tools=None):
+                self.messages = messages
+                return {"content": "Ready."}
+        provider = Provider()
+        capri = Capri(self.config, self.store, provider)
+        capri.reply("Please keep me posted about deadlines.", 1)
+        capri.reply("/digest", 2)
+        self.assertEqual(self.store.setting("conversation_language_hint"), "Please keep me posted about deadlines.")
+        job = self.store.jobs()[0]
+        self.store.claim_job()
+        self.store.finish(job["id"], error_result("blocked", "login required"))
+        capri.report(self.store.job(job["id"]))
+        self.assertIn("Please keep me posted about deadlines.", provider.messages[1]["content"])
+        self.assertIn("free-form", provider.messages[1]["content"])
 
 
 if __name__ == "__main__":
