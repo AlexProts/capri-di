@@ -89,6 +89,18 @@ class Capri:
     def __init__(self, config, store, llm, router_llm=None):
         self.config, self.store, self.llm = config, store, llm
         self.router_llm = router_llm or llm
+        self.router_retry_after = 0
+
+    def select_step(self, messages):
+        if self.router_llm is self.llm or time.time() < self.router_retry_after:
+            return route_turn(self.llm, messages, TOOLS)
+        try:
+            return route_turn(self.router_llm, messages, TOOLS)
+        except RemoteError:
+            # Choosing a step has no side effects, so a provider fallback cannot replay work.
+            self.router_retry_after = time.time() + 900
+            log.warning("Auxiliary dispatcher unavailable; using main model for 15 minutes")
+            return route_turn(self.llm, messages, TOOLS)
 
     def resolve_assignment(self, request, supplied="", parent=None):
         try:
@@ -321,7 +333,7 @@ class Capri:
             messages.append({"role": "system", "content": "Interpret the latest owner command as this request: " + json.dumps(text, ensure_ascii=False)})
         for _ in range(6):
             try:
-                plan = route_turn(self.router_llm, messages, TOOLS)
+                plan = self.select_step(messages)
             except InvalidDecision as error:
                 messages.append({"role": "system", "content": "Invalid workflow decision, nothing executed: " + str(error)})
                 continue

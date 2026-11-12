@@ -54,7 +54,7 @@ def main():
         reminder = capri.reply("Напомни завтра в 18:00 проверить результат этой домашки", 3)
         assert len(store.todos()) == 1 and store.todos()[0]["remind_at"], "Natural-language reminder was not saved"
         print(json.dumps({"passed": True, "model": config.model, "clarification": question, "accepted": accepted, "reminder": reminder,
-                          "real_telegram_sends": 0, "real_worker_runs": 0}, ensure_ascii=False))
+                          "auxiliary_fallback_used": bool(capri.router_retry_after), "real_telegram_sends": 0, "real_worker_runs": 0}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

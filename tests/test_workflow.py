@@ -97,6 +97,19 @@ class WorkflowTests(unittest.TestCase):
             self.capri.reply("Отправь ещё раз задачу по рек сису", 1)
         self.assertEqual(len(self.store.jobs()), 2)
 
+    def test_auxiliary_provider_failure_falls_back_without_duplicating_actions(self):
+        parent = self.seed()
+        auxiliary = OpenRouter("fake", "fake/aux")
+        capri = Capri(config(self.temp.name), self.store, self.llm, router_llm=auxiliary)
+        plan = routed("continue_homework", {"job_id": parent, "request": "Продолжить без прикрепления"})
+        with patch.object(auxiliary, "chat", side_effect=RemoteError("OpenRouter", "HTTP 429")) as failed, patch.object(self.llm, "chat", return_value=plan):
+            answer = capri.reply("Пусть Ди продолжит", 1)
+            self.assertIn("очередь", answer)
+            with patch.object(self.llm, "chat", return_value=routed(reply="Я тут.")):
+                capri.reply("Ты тут?", 2)
+        self.assertEqual(failed.call_count, 1)
+        self.assertEqual(len([j for j in self.store.jobs() if j["parent_id"] == parent]), 1)
+
     def test_continue_shortcut_without_instruction_uses_context_instead_of_bouncing_user(self):
         parent = self.seed()
         with patch.object(self.llm, "chat", return_value=routed("continue_homework", {"job_id": parent, "request": "Продолжить без прикрепления"})):
