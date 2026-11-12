@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import sqlite3
 import time
@@ -11,6 +12,17 @@ class Store:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = self.root / "assistant.db"
+        # SQLite normally creates files with 0644, even with a group-friendly umask.
+        # Precreate with explicit permissions: Capri and Di use different UIDs.
+        try:
+            fd = os.open(self.db, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            try:
+                os.fchmod(fd, 0o660)
+            finally:
+                os.close(fd)
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -24,11 +36,13 @@ class Store:
                 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS outbox(
                     id INTEGER PRIMARY KEY, dedup TEXT UNIQUE NOT NULL,
-                    text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', message_id INTEGER);
+                    text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', message_id INTEGER,
+                    file_path TEXT NOT NULL DEFAULT '');
                 CREATE TABLE IF NOT EXISTS inbox(
                     update_id INTEGER PRIMARY KEY, payload TEXT NOT NULL,
                     state TEXT NOT NULL DEFAULT 'pending');
             """)
+            db.execute("BEGIN IMMEDIATE")
             columns = {r[1] for r in db.execute("PRAGMA table_info(outbox)")}
             if "file_path" not in columns:
                 db.execute("ALTER TABLE outbox ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")

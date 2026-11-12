@@ -14,6 +14,9 @@ for account in capri di; do
   install -d -m 700 -o "$account" -g capri-di "/var/lib/capri-di/$account"
 done
 install -d -m 2770 -o capri -g capri-di /var/lib/capri-di/shared
+if [[ ! -e /var/lib/capri-di/shared/assistant.db ]]; then
+  install -m 660 -o capri -g capri-di /dev/null /var/lib/capri-di/shared/assistant.db
+fi
 install -d -m 755 /opt/capri-di /etc/capri-di
 # Install only committed files. No .env, browser profile or auth cache is copied.
 git -C "$repo_dir" archive HEAD | tar -x -C /opt/capri-di

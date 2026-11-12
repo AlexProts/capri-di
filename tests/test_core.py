@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
+import stat
 from pathlib import Path
 import tempfile
 import unittest
@@ -33,6 +34,21 @@ class CoreTests(unittest.TestCase):
         with ThreadPoolExecutor(2) as pool:
             claims = list(pool.map(lambda _: self.store.claim_job(), range(2)))
         self.assertEqual(sum(c is not None for c in claims), 1)
+
+    def test_shared_database_is_group_writable_even_with_restrictive_umask(self):
+        root = Path(self.temp.name) / "restrictive"
+        old = os.umask(0o077)
+        try:
+            store = Store(root)
+        finally:
+            os.umask(old)
+        self.assertEqual(stat.S_IMODE(store.db.stat().st_mode), 0o660)
+        with store.connect() as db:
+            db.execute("INSERT INTO settings VALUES('permissions','checked')")
+            for name in ('assistant.db-wal', 'assistant.db-shm'):
+                sidecar = root / name
+                if sidecar.exists():
+                    self.assertTrue(sidecar.stat().st_mode & stat.S_IWGRP, name)
 
     def test_restart_never_requeues_external_actions(self):
         job = self.store.enqueue("tests", "pass tests", "owner", "tests")

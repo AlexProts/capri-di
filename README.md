@@ -113,6 +113,16 @@ Time вручную, включив `TIME_ENABLED=true`, и отправив `/t
 
 ## Проверка и ограничения
 
+Если обе службы падают с `attempt to write a readonly database`, выполните:
+
+```bash
+sudo bash deploy/repair-storage.sh
+```
+
+Скрипт останавливает обе службы, восстанавливает групповые права только для общей
+БД и её журналов, проверяет запись от `capri` и `di`, затем запускает службы.
+Данные, env и авторизация не удаляются.
+
 ```bash
 python3 -m unittest discover -s tests -v
 ```
