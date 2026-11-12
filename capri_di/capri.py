@@ -134,6 +134,13 @@ class Capri:
 
     def report(self, job):
         result = json.loads(job["result"])
+        if result["status"] != "completed":
+            # Preserve failure facts verbatim: a persona must not invent causes or actions.
+            labels = {"lms": "сбор LMS", "time": "чтение Time", "homework": "подготовка домашки",
+                      "tests": "учебные тесты", "submit": "сдача домашки"}
+            return compact(f"Alex, {labels.get(job['kind'], job['kind'])}: {result['status']}.\n"
+                           + result["summary"] + "\nПричина не уточняется предположениями. Автоматического повтора нет."
+                           + f"\nID: {job['id']}")
         context = {"job_id": job["id"], "kind": job["kind"], "result": result}
         message = self.llm.chat([
             {"role": "system", "content": SYSTEM},

@@ -183,6 +183,18 @@ class CoreTests(unittest.TestCase):
         self.assertIn(job_id, report)
         self.assertEqual(len(self.store.jobs()), 1)
 
+    def test_unknown_report_does_not_invent_authentication_failure(self):
+        class NoProvider:
+            def chat(self, *args, **kwargs):
+                raise AssertionError("Failure reports must preserve known facts")
+        capri = Capri(self.config, self.store, NoProvider())
+        result = error_result("unknown", "Codex returned no confirmed result")
+        job = {"id": "test-job", "kind": "lms", "result": json.dumps(result)}
+        answer = capri.report(job)
+        self.assertIn("Codex returned no confirmed result", answer)
+        self.assertIn("сбор LMS", answer)
+        self.assertNotIn("login-desktop.sh", answer)
+
     def test_digest_retains_user_language_across_commands(self):
         class Provider:
             def __init__(self):
@@ -197,7 +209,9 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.store.setting("conversation_language_hint"), "Please keep me posted about deadlines.")
         job = self.store.jobs()[0]
         self.store.claim_job()
-        self.store.finish(job["id"], error_result("blocked", "login required"))
+        result = error_result("completed", "read")
+        result["collected_at"] = "2026-11-12T09:00:00+03:00"
+        self.store.finish(job["id"], result)
         capri.report(self.store.job(job["id"]))
         self.assertIn("Please keep me posted about deadlines.", provider.messages[1]["content"])
         self.assertIn("free-form", provider.messages[1]["content"])
