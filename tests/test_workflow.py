@@ -118,6 +118,7 @@ class WorkflowTests(unittest.TestCase):
         payload = request.call_args.args[1]
         self.assertEqual(payload["tool_choice"], {"type": "function", "function": {"name": "route_request"}})
         self.assertEqual(payload["tools"][0]["function"]["name"], "route_request")
+        self.assertEqual(payload["reasoning"], {"enabled": False})
 
     def test_natural_submission_and_files_are_separate_from_preparation(self):
         parent = self.store.enqueue("homework", "Prepare " + URL4, "owner", "ready")

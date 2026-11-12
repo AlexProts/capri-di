@@ -35,7 +35,7 @@ def route_turn(llm, messages, catalog):
         "For each tool supply only its documented arguments. reply is used only for answer/clarify, in Capri's voice and the user's language. "
         "Tool catalog: " + json.dumps(catalog, ensure_ascii=False))
     response = llm.chat([*messages, {"role": "system", "content": instruction}], [router],
-                        tool_choice={"type": "function", "function": {"name": "route_request"}}, max_tokens=1200)
+                        tool_choice={"type": "function", "function": {"name": "route_request"}}, max_tokens=1600, reasoning={"enabled": False})
     try:
         calls = response["tool_calls"]
         if len(calls) != 1 or calls[0]["function"]["name"] != "route_request":

@@ -18,6 +18,8 @@ def main():
         def chat(self, *args, **kwargs):
             result = super().chat(*args, **kwargs)
             if kwargs.get("tool_choice"):
+                if not result.get("tool_calls"):
+                    print(json.dumps({"probe_invalid_response": {"keys": list(result), "content": str(result.get("content", ""))[:600], "reasoning_characters": len(str(result.get("reasoning", "")))}}, ensure_ascii=False), flush=True)
                 for call in result.get("tool_calls", []):
                     print(json.dumps({"probe_route": json.loads(call["function"]["arguments"])}, ensure_ascii=False), flush=True)
             return result

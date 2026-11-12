@@ -81,10 +81,12 @@ class OpenRouter:
     def __init__(self, key, model):
         self.key, self.model = key, model
 
-    def chat(self, messages, tools=None, *, tool_choice="auto", max_tokens=1800):
+    def chat(self, messages, tools=None, *, tool_choice="auto", max_tokens=1800, reasoning=None):
         payload = {"model": self.model, "messages": messages, "max_tokens": max_tokens}
         if tools:
             payload.update(tools=tools, tool_choice=tool_choice, parallel_tool_calls=False)
+        if reasoning is not None:
+            payload["reasoning"] = reasoning
         data = post_json("https://openrouter.ai/api/v1/chat/completions", payload,
                          {"Authorization": "Bearer " + self.key}, timeout=90, service="OpenRouter")
         try:
