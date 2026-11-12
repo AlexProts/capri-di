@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from .network import RemoteError
 from .relevance import digest_result
 from .context import bounded_history, conversation_context, delegation_context, recall, find_assignment
-from .workflow import route_turn
+from .workflow import route_turn, InvalidDecision
 
 SYSTEM = (Path(__file__).parent / "prompts/capri.md").read_text()
 MSK = ZoneInfo("Europe/Moscow")
@@ -86,8 +86,9 @@ class AssignmentSelectionRequired(ValueError):
 
 
 class Capri:
-    def __init__(self, config, store, llm):
+    def __init__(self, config, store, llm, router_llm=None):
         self.config, self.store, self.llm = config, store, llm
+        self.router_llm = router_llm or llm
 
     def resolve_assignment(self, request, supplied="", parent=None):
         try:
@@ -319,7 +320,11 @@ class Capri:
         if text.startswith(("Продолжи домашку ", "Подготовь домашку: ")):
             messages.append({"role": "system", "content": "Interpret the latest owner command as this request: " + json.dumps(text, ensure_ascii=False)})
         for _ in range(6):
-            plan = route_turn(self.llm, messages, TOOLS)
+            try:
+                plan = route_turn(self.router_llm, messages, TOOLS)
+            except InvalidDecision as error:
+                messages.append({"role": "system", "content": "Invalid workflow decision, nothing executed: " + str(error)})
+                continue
             name, args = plan["tool"], plan["arguments"]
             if name in {"answer", "clarify"}:
                 answer = plan["reply"].strip()
@@ -329,7 +334,11 @@ class Capri:
                 if re.search(r"/continue|\brecall\b|уточни у пользователя|найди.{0,20}дайджест", answer, re.I) and not re.search(r"как|команд|help", text, re.I):
                     messages.append({"role": "system", "content": "Rejected reply: it handed internal work to the owner. Use the tool yourself or ask a concrete choice between actual assignment titles. Do not tell the owner to enter a command."})
                     continue
-                self.store.set_setting("pending_workflow", json.dumps({"original_request": pending.get("original_request", text), "question": answer}, ensure_ascii=False) if name == "clarify" else "{}")
+                self.store.set_setting("pending_workflow", json.dumps({"workflow": plan["workflow"], "original_request": pending.get("original_request", text), "question": answer}, ensure_ascii=False) if name == "clarify" else "{}")
+                if name == "answer" and plan["workflow"] == "conversation" and self.router_llm is not self.llm:
+                    response = self.llm.chat([*messages, {"role": "system", "content": "Reply conversationally in Capri's voice. Workflow selected a conversation answer, no action was dispatched in this turn. Do not claim you started, resumed or submitted a task. Use only known data. Draft factual answer: " + answer}])
+                    if isinstance(response.get("content"), str) and response["content"].strip():
+                        answer = response["content"]
                 return compact(answer)
             try:
                 result = self.tool(name, args, update_id)

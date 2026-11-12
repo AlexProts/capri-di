@@ -22,8 +22,10 @@ def config(root):
     return Config(Path(root), 42, "fake", "fake", "fake/model", True, True, True, (18,), 4, 10)
 
 
-def routed(tool="answer", arguments=None, reply="Поняла."):
-    return {"tool_calls": [{"id": "route", "type": "function", "function": {"name": "route_request", "arguments": json.dumps({"tool": tool, "arguments": arguments or {}, "reply": reply})}}]}
+def routed(tool="answer", arguments=None, reply=None, workflow=None):
+    args = arguments or {}
+    workflow = workflow or {"continue_homework": "continue_homework", "todo": "todo", "remember": "memory", "forget": "memory", "get_files": "files", "submit_homework": "submit"}.get(tool, "new_homework" if tool == "delegate" and args.get("kind") == "homework" else "conversation")
+    return {"tool_calls": [{"id": "route", "type": "function", "function": {"name": "route_request", "arguments": json.dumps({"workflow": workflow, "tool": tool, "arguments": args, "reply": reply if reply is not None else "Поняла." if tool in {"answer", "clarify"} else ""})}}]}
 
 
 class CoreTests(unittest.TestCase):

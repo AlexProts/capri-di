@@ -37,7 +37,8 @@ def run_bot(config):
         raise ValueError("Fill TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, TELEGRAM_OWNER_ID, OPENROUTER_API_KEY, OPENROUTER_MODEL")
     store = Store(config.state)
     telegram = Telegram(config.telegram_token, config.owner, config.bot_username)
-    capri = Capri(config, store, OpenRouter(config.openrouter_key, config.model))
+    capri = Capri(config, store, OpenRouter(config.openrouter_key, config.model),
+                  router_llm=OpenRouter(config.openrouter_key, config.routing_model or config.model))
     with (config.state / "capri.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         telegram.verify()

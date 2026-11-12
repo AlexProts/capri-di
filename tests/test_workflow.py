@@ -81,6 +81,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("/continue", answer)
         self.assertIn("очередь", answer)
 
+    def test_question_disguised_as_dispatch_is_rejected_before_any_task_is_created(self):
+        self.seed(ambiguous=True)
+        invalid = routed("delegate", {"kind": "homework", "request": "ДЗ4 или5", "assignment_url": URL4}, reply="Какую именно, четвёртую или пятую?")
+        with patch.object(self.llm, "chat", side_effect=[invalid, routed("clarify", reply="ДЗ 4 про графовые сети или ДЗ 5 — соревнование?", workflow="continue_homework")]):
+            answer = self.capri.reply("Отправь ещё раз задачу по рек сису", 1)
+        self.assertIn("Граф", answer.title())
+        self.assertEqual(len(self.store.jobs()), 2)
+        self.assertEqual(json.loads(self.store.setting("pending_workflow"))["workflow"], "continue_homework")
+
+    def test_continuation_workflow_cannot_dispatch_a_new_unlinked_homework(self):
+        self.seed(ambiguous=True)
+        invalid = routed("delegate", {"kind": "homework", "request": "ДЗ4", "assignment_url": URL4}, workflow="continue_homework")
+        with patch.object(self.llm, "chat", side_effect=[invalid, routed("clarify", reply="ДЗ 4 или ДЗ 5?", workflow="continue_homework")]):
+            self.capri.reply("Отправь ещё раз задачу по рек сису", 1)
+        self.assertEqual(len(self.store.jobs()), 2)
+
     def test_continue_shortcut_without_instruction_uses_context_instead_of_bouncing_user(self):
         parent = self.seed()
         with patch.object(self.llm, "chat", return_value=routed("continue_homework", {"job_id": parent, "request": "Продолжить без прикрепления"})):

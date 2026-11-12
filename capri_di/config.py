@@ -26,6 +26,7 @@ class Config:
     bot_username: str = ""
     time_quiet_start: int = 0
     time_quiet_end: int = 8
+    routing_model: str = "qwen/qwen3.7-flash"
 
     @classmethod
     def load(cls):
@@ -45,4 +46,5 @@ class Config:
                    os.environ.get("OPENROUTER_MODEL", ""),
                    flag("SCHEDULES_ENABLED"), flag("PROACTIVE_TESTS_ENABLED"),
                    flag("TIME_ENABLED"), hours, interval, test_hour,
-                   os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@"), quiet_start, quiet_end)
+                   os.environ.get("TELEGRAM_BOT_USERNAME", "").lstrip("@"), quiet_start, quiet_end,
+                   os.environ.get("OPENROUTER_ROUTING_MODEL", "qwen/qwen3.7-flash"))
