@@ -79,6 +79,8 @@ class Worker:
         shutil.copyfile(PACKAGE / "schemas/result.json", schema)
         prompt = {"job_id": job["id"], "kind": job["kind"], "user_request": job["request"],
                   "origin": job["origin"], "instruction": "Выполни только эту задачу по AGENTS.md. Верни JSON по схеме."}
+        if job.get("context"):
+            prompt["reference_context_data"] = json.loads(job["context"])
         if job["kind"] == "time":
             prompt["since_last_successful_collection"] = self.store.setting("time_collected_at")
         if job["kind"] == "submit":

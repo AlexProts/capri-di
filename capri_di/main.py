@@ -76,7 +76,9 @@ def run_bot(config):
                     try:
                         handle_update(config, store, capri, update)
                     except RemoteError:
-                        store.queue_text(f"reply:{update['update_id']}", "На связи с моделью случился сбой. Если Ди уже получил поручение, оно есть в /status. Заново сама не отправляю.")
+                        answer = "На связи с моделью случился сбой. Поручения Ди можно проверить в /status, дела — в /todo, заметки — в /memory. Повторно ничего не отправляю."
+                        store.remember_message("assistant", answer)
+                        store.queue_text(f"reply:{update['update_id']}", answer)
                     store.processed(update["update_id"])
             except RemoteError as error:
                 log.warning("Remote request failed: %s", error)
