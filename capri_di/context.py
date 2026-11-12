@@ -38,6 +38,30 @@ def find_assignment(store, query):
     return matches[:8]
 
 
+def previous_homework(store, assignment_url):
+    jobs = store.jobs(100)
+    parents = {j["parent_id"] for j in jobs if j.get("parent_id")}
+    leaves = [j for j in jobs if j["kind"] == "homework" and j["id"] not in parents]
+    for job in leaves:
+        known = json.loads(job["context"]).get("assignment_url", "")
+        if known == assignment_url or assignment_url in job["request"]:
+            return job
+    # Legacy jobs had a course name but no URL. Reuse only a unique matching
+    # course thread; never pick one of several old workspaces arbitrarily.
+    course = ""
+    for job in jobs:
+        result = json.loads(job["result"]) if job["result"] else {}
+        for record in result.get("records", []):
+            if record.get("url") == assignment_url:
+                course = record.get("course", "")
+                break
+        if course:
+            break
+    tags = study_terms(course) & {"рекомендательные", "nlp", "production", "agile", "технологическое"}
+    matches = [j for j in leaves if not json.loads(j["context"]).get("assignment_url") and tags & study_terms(j["request"])]
+    return matches[0] if len(matches) == 1 else None
+
+
 def bounded_history(store, budget=16000):
     messages = []
     for row in reversed(store.history()):

@@ -38,7 +38,7 @@ def route_turn(llm, messages, catalog):
                         tool_choice={"type": "function", "function": {"name": "route_request"}}, max_tokens=1600, reasoning={"enabled": False})
     try:
         calls = response["tool_calls"]
-        if len(calls) != 1 or calls[0]["function"]["name"] != "route_request":
+        if len(calls) != 1 or calls[0]["function"]["name"] != "route_request" or not isinstance(calls[0]["id"], str):
             raise ValueError
         plan = json.loads(calls[0]["function"]["arguments"])
         if set(plan) != {"workflow", "tool", "arguments", "reply"} or plan["tool"] not in names + ["answer", "clarify"] or not isinstance(plan["arguments"], dict) or not isinstance(plan["reply"], str):
@@ -49,4 +49,6 @@ def route_turn(llm, messages, catalog):
         raise InvalidDecision("Action selected while speaking/asking in reply. If asking which assignment, choose clarify. Otherwise select a tool with reply='', as it runs immediately.")
     if plan["workflow"] == "continue_homework" and plan["tool"] == "delegate":
         raise InvalidDecision("Continuation cannot use delegate/new homework. Use continue_homework with the existing parent ID, or clarify which assignment.")
+    plan["_assistant_message"] = {"role": "assistant", "content": response.get("content"), "tool_calls": calls}
+    plan["_tool_call_id"] = calls[0]["id"]
     return plan

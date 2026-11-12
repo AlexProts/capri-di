@@ -65,6 +65,8 @@ class WorkflowTests(unittest.TestCase):
         error_context = model.call_args_list[1].args[0]
         self.assertIn("assignment_selection_required", str(error_context))
         self.assertIn("Графовые сети", str(error_context))
+        self.assertEqual(error_context[-3]["role"], "assistant")
+        self.assertEqual(error_context[-2]["role"], "tool")
         followup = routed("continue_homework", {"job_id": parent, "request": "Подготовить ДЗ 4 и проверить, не прикреплять", "assignment_url": URL4, "install_dependencies": True})
         with patch.object(self.llm, "chat", return_value=followup):
             answer = self.capri.reply("четвертую, библиотеки можно поставить", 2)
@@ -116,6 +118,13 @@ class WorkflowTests(unittest.TestCase):
             answer = self.capri.reply("/continue " + parent, 1)
         self.assertIn("очередь", answer)
         self.assertNotIn("Нужны ID", answer)
+
+    def test_preparation_of_same_assignment_reuses_legacy_work_instead_of_starting_over(self):
+        parent = self.seed()
+        plan = routed("delegate", {"kind": "homework", "request": "Доделать ДЗ 4, проверить и не прикреплять", "assignment_url": URL4})
+        with patch.object(self.llm, "chat", return_value=plan):
+            self.capri.reply("Доделай ту же домашку", 1)
+        self.assertEqual(self.store.jobs()[0]["parent_id"], parent)
 
     def test_course_alias_finds_candidates_without_generating_new_jobs(self):
         self.seed(ambiguous=True)
