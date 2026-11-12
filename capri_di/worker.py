@@ -10,6 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from .store import Store
+from .relevance import relevant_record
 
 PACKAGE = Path(__file__).parent
 
@@ -78,6 +79,8 @@ class Worker:
         shutil.copyfile(PACKAGE / "schemas/result.json", schema)
         prompt = {"job_id": job["id"], "kind": job["kind"], "user_request": job["request"],
                   "origin": job["origin"], "instruction": "Выполни только эту задачу по AGENTS.md. Верни JSON по схеме."}
+        if job["kind"] == "time":
+            prompt["since_last_successful_collection"] = self.store.setting("time_collected_at")
         if job["kind"] == "submit":
             parent = self.store.job(job["request"])
             if not parent or parent["kind"] != "homework" or parent["state"] != "completed":
@@ -120,6 +123,10 @@ class Worker:
             if output.stat().st_size > 2 * 1024 * 1024:
                 raise ValueError("Result too large")
             result = validate_result(json.loads(output.read_text()), job["kind"])
+            if job["kind"] == "lms":
+                result["records"] = [r for r in result["records"] if relevant_record(r)]
+            if job["kind"] == "time" and result["status"] == "completed" and not result["source_errors"]:
+                self.store.set_setting("time_collected_at", result["collected_at"])
             for name in result["artifacts"]:
                 src = safe_artifact(work, name)
                 destination = self.store.root / "artifacts" / job["id"] / name.removeprefix("artifacts/")

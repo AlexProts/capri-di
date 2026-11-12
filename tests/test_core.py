@@ -15,6 +15,7 @@ from capri_di.main import handle_update
 from capri_di.network import post_json, RemoteError
 from capri_di.store import Store
 from capri_di.worker import safe_artifact, validate_result, error_result, Worker
+from capri_di.relevance import digest_result, relevant_record
 
 
 def config(root):
@@ -100,9 +101,9 @@ class CoreTests(unittest.TestCase):
 
     def test_empty_homework_and_submit_guard(self):
         capri = Capri(self.config, self.store, None)
-        self.assertIn("пришли задание", capri.reply("/do", 1))
+        self.assertIn("задание или ссылку", capri.reply("/do", 1))
         self.assertEqual(self.store.jobs(), [])
-        self.assertIn("Ничего не отправлено", capri.reply("/submit invalid", 2))
+        self.assertIn("ничего не отправляла", capri.reply("/submit invalid", 2))
 
     def test_model_cannot_execute_shell_or_submit(self):
         capri = Capri(self.config, self.store, None)
@@ -194,6 +195,70 @@ class CoreTests(unittest.TestCase):
         self.assertIn("Codex returned no confirmed result", answer)
         self.assertIn("сбор LMS", answer)
         self.assertNotIn("login-desktop.sh", answer)
+
+    def test_lms_scope_filters_archive_admin_and_submitted_but_keeps_overdue(self):
+        def record(**changes):
+            return {"source":"lms", "url":"https://my.centraluniversity.ru/learn/courses/view/actual/1/themes/2/longreads/3",
+                    "title":"ДЗ 4", "course":"NLP", "status":"Не сдано", "due_at":"1 ноября", **changes}
+        overdue = record()
+        archived = record(url="https://my.centraluniversity.ru/learn/courses/view/archived/135/themes/686/longreads/1564")
+        obsolete = record(title="Домашнее задание. (НЕактуально с 02.11)")
+        regulation = record(course="Ознакомление с локально-нормативными актами и приказами ЦУ")
+        review = record(status="На проверке")
+        submitted = record(status="Сдано")
+        self.assertTrue(relevant_record(overdue))
+        for excluded in (archived, obsolete, regulation, review, submitted):
+            self.assertFalse(relevant_record(excluded))
+        raw = {"status":"completed", "summary":"Legacy archive and admin summary", "records":[overdue,archived,regulation,review]}
+        scoped = digest_result(raw)
+        self.assertEqual(scoped["records"], [overdue])
+        self.assertNotIn("summary", scoped)
+        self.assertEqual(len(raw["records"]), 4)
+
+    def test_fallback_is_short_relevant_and_has_no_real_name_or_technical_status(self):
+        result = error_result("completed", "Collected all 17 active records; completed")
+        result["collected_at"] = "2026-11-12T09:00:00+03:00"
+        base = {"source":"lms", "title":"ДЗ 9", "course":"Командная работа по Agile",
+                "status":"Задано", "due_at":"12 ноября, 20:00", "url":"https://my.centraluniversity.ru/learn/courses/view/actual/1"}
+        result["records"] = [base, {**base,"title":"ОРГ_2","url":"https://my.centraluniversity.ru/learn/courses/view/archived/135"}]
+        answer = Capri.fallback({"kind":"lms"}, result)
+        for unwanted in ("Alex", "completed", "17 active", "ОРГ_2"):
+            self.assertNotIn(unwanted, answer)
+        self.assertIn("20:00", answer)
+        self.assertIn(base["url"], answer)
+
+    def test_formatter_gets_only_relevant_records_and_no_legacy_summary(self):
+        class Provider:
+            def chat(self, messages, tools=None):
+                supplied = json.loads(messages[-1]["content"])["result"]
+                self.supplied = supplied
+                return {"content":"Сегодня сначала Agile — до 20:00."}
+        result = error_result("completed", "Archived task ORG_2 summary")
+        result["records"] = [{"source":"lms","course":"ORG_2","title":"Old task","status":"На проверке",
+                              "url":"https://my.centraluniversity.ru/learn/courses/view/archived/135"}]
+        provider = Provider()
+        answer = Capri(self.config,self.store,provider).report({"kind":"lms","id":"job-id","result":json.dumps(result)})
+        self.assertEqual(provider.supplied["records"], [])
+        self.assertNotIn("summary", provider.supplied)
+        self.assertNotIn("ID:", answer)
+        self.assertNotIn("Alex", Capri.acknowledge({"job_id":"job-id"}))
+
+    def test_time_collection_passes_successful_checkpoint_to_next_job(self):
+        root = Path(self.temp.name)
+        executable = root / "fake-time-codex"
+        result = error_result("completed", "Checked new announcements")
+        result["collected_at"] = "2026-11-12T09:00:00+03:00"
+        executable.write_text("#!/usr/bin/env python3\nimport json,sys,pathlib\np=json.load(sys.stdin)\na=sys.argv\nwork=pathlib.Path(a[a.index('--cd')+1])\n(work/'observed-prompt.json').write_text(json.dumps(p))\nresult=" + repr(result) + "\npathlib.Path(a[a.index('--output-last-message')+1]).write_text(json.dumps(result))\n")
+        executable.chmod(0o700)
+        worker = Worker(self.store, root / "time-work", str(executable), timeout=10)
+        for key in ("first", "second"):
+            job_id = self.store.enqueue("time", "Read new study messages", "owner", key)
+            job = self.store.claim_job()
+            returned = worker.run(job)
+            self.store.finish(job_id, returned)
+            supplied = json.loads((root / "time-work" / job_id / "observed-prompt.json").read_text())
+            self.assertEqual(supplied["since_last_successful_collection"], "" if key == "first" else result["collected_at"])
+        self.assertEqual(self.store.setting("time_collected_at"), result["collected_at"])
 
     def test_digest_retains_user_language_across_commands(self):
         class Provider:

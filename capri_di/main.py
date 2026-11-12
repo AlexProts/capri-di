@@ -26,7 +26,7 @@ def handle_update(config, store, capri, update):
     text = message.get("text")
     if not isinstance(text, str):
         text = "/unsupported"
-        answer = "Alex, пока принимаю текст и ссылки. Файлы оставь в LMS или рабочей папке Ди."
+        answer = "Пока принимаю текст и ссылки. Файлы можно оставить в LMS или рабочей папке Ди."
     else:
         answer = capri.reply(text, update["update_id"])
     store.queue_text(f"reply:{update['update_id']}", answer)
@@ -49,9 +49,10 @@ def run_bot(config):
                 for job in store.unreported():
                     try:
                         report = capri.report(job)
-                    except RemoteError:
+                    except RemoteError as error:
                         # Collection/results still delivered without LLM formatting on provider failure.
-                        report = capri.fallback(job, json.loads(job["result"])) + f"\nЗадача: {job['id']}"
+                        log.warning("Digest formatter unavailable for job %s: %s; using compact fallback", job["id"], error)
+                        report = capri.fallback(job, json.loads(job["result"]))
                     store.queue_text("job:" + job["id"], report)
                 while item := store.claim_message():
                     try:
@@ -75,7 +76,7 @@ def run_bot(config):
                     try:
                         handle_update(config, store, capri, update)
                     except RemoteError:
-                        store.queue_text(f"reply:{update['update_id']}", "Alex, Капри не получила ответ провайдера. Если поручение успело попасть к Ди, оно видно в /status. Повторно сама не отправляю.")
+                        store.queue_text(f"reply:{update['update_id']}", "На связи с моделью случился сбой. Если Ди уже получил поручение, оно есть в /status. Заново сама не отправляю.")
                     store.processed(update["update_id"])
             except RemoteError as error:
                 log.warning("Remote request failed: %s", error)

@@ -158,7 +158,7 @@ class Store:
             rows = db.execute("SELECT update_id FROM inbox WHERE state='processing'").fetchall()
             for row in rows:
                 db.execute("INSERT OR IGNORE INTO outbox(dedup,text) VALUES(?,?)",
-                           (f"reply:{row[0]}", "Alex, Капри перезапустилась во время обработки сообщения. Проверь /status: поставленные поручения сохранены, автоповтора нет."))
+                           (f"reply:{row[0]}", "Я перезапустилась на середине сообщения. Поставленные поручения сохранены в /status — повторно их не отправляла."))
             db.execute("UPDATE inbox SET state='interrupted' WHERE state='processing'")
 
     def set_setting(self, key, value):
