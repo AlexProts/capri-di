@@ -38,17 +38,17 @@ def main():
                              {"id": "hw5", "source": "lms", "title": "ДЗ 5. Соревнование", "course": "Рекомендательные системы", "status": "Задано", "due_at": "28 декабря 2026, 20:00", "url": "https://my.centraluniversity.ru/learn/courses/view/actual/1248/themes/12168/longreads/45997", "details": "Подготовить решение по условию LMS"}]
         store.finish(source, result)
         capri = Capri(config, store, OpenRouter(config.openrouter_key, config.model), router_llm=ProbeModel(config.openrouter_key, config.routing_model or config.model))
-        question = capri.reply("отправь еще раз ди задачку на рек сис", 1)
+        question = capri.reply("отправишь ди задачу на рек сис?", 1)
         print(json.dumps({"probe_question": question}, ensure_ascii=False), flush=True)
         assert len([j for j in store.jobs() if j["kind"] == "homework"]) == 1, "Must clarify ambiguous HW4/HW5 before execution"
         assert "/continue" not in question and "recall" not in question, "Internal instruction leaked"
         assert any(term in question.casefold() for term in ("4", "5", "граф", "соревн")), "Need a concrete assignment choice"
-        accepted = capri.reply("ДЗ 4, графовые сети. Библиотеки разрешаю ставить, доделать и проверить, не прикреплять", 2)
+        accepted = capri.reply("4", 2)
         print(json.dumps({"probe_acceptance": accepted}, ensure_ascii=False), flush=True)
         children = [j for j in store.jobs() if j["parent_id"] == parent]
         assert len(children) == 1, "Clarification must actually enqueue continuation"
         child = children[0]
-        assert json.loads(child["permissions"])["install_dependencies"], "Owner library permission was lost"
+        assert not json.loads(child["permissions"])["install_dependencies"], "A numeric choice must not grant library permission"
         assert json.loads(child["context"])["assignment_url"].endswith("/44572"), "Wrong assignment"
         assert all(j["kind"] != "submit" for j in store.jobs()), "Preparation must not submit"
         reminder = capri.reply("Напомни завтра в 18:00 проверить результат этой домашки", 3)

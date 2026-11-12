@@ -8,6 +8,7 @@ from capri_di.capri import Capri
 from capri_di.context import find_assignment
 from capri_di.network import OpenRouter, RemoteError
 from capri_di.store import Store
+from capri_di.selection import selected_assignment
 from capri_di.worker import error_result
 from test_core import config, routed
 
@@ -118,6 +119,44 @@ class WorkflowTests(unittest.TestCase):
             answer = self.capri.reply("/continue " + parent, 1)
         self.assertIn("очередь", answer)
         self.assertNotIn("Нужны ID", answer)
+
+    def test_bare_number_completes_stored_choice_without_another_llm_decision(self):
+        parent = self.seed(ambiguous=True)
+        attempted = routed("continue_homework", {"job_id": parent, "request": "Продолжить, не прикреплять", "install_dependencies": True})
+        with patch.object(self.llm, "chat", side_effect=[attempted, routed("clarify", reply="Хочешь, чтобы я отправил ДЗ 4 или ДЗ 5?", workflow="conversation")]):
+            question = self.capri.reply("отправишь ди задачу на рек сис?", 1)
+        self.assertIn("Графовые сети", question)
+        self.assertNotIn("отправил", question)
+        saved = json.loads(self.store.setting("pending_workflow"))
+        self.assertEqual(saved["action"], "continue_homework")
+        self.assertEqual(saved["job_id"], parent)
+        self.assertEqual(len(saved["candidates"]), 2)
+        reloaded = Store(self.temp.name)
+        with patch.object(self.llm, "chat", side_effect=AssertionError("Literal selection must not be reinterpreted by LLM")):
+            answer = Capri(config(self.temp.name), reloaded, self.llm).reply("4", 2)
+        self.assertIn("очередь", answer)
+        child = reloaded.jobs()[0]
+        self.assertEqual(child["parent_id"], parent)
+        self.assertEqual(json.loads(child["context"])["assignment_url"], URL4)
+        self.assertTrue(json.loads(child["permissions"])["install_dependencies"])
+        self.assertEqual(reloaded.setting("pending_workflow"), "{}")
+
+    def test_legacy_pending_question_enriches_bare_number_with_original_request_and_exact_url(self):
+        parent = self.seed(ambiguous=True)
+        self.store.set_setting("pending_workflow", json.dumps({"workflow": "conversation", "original_request": "отправишь ди задачу на рек сис?", "question": "ДЗ4 или ДЗ5?"}))
+        with patch.object(self.llm, "chat", return_value=routed("continue_homework", {"job_id": parent, "request": "Подготовить ДЗ4 без прикрепления", "assignment_url": URL4})) as model:
+            answer = self.capri.reply("4", 2)
+        self.assertIn("очередь", answer)
+        self.assertIn("resolved_assignment_selection", str(model.call_args.args[0]))
+        self.assertIn(URL4, str(model.call_args.args[0]))
+
+    def test_numeric_choices_do_not_use_menu_position_or_choose_between_duplicate_task_numbers(self):
+        candidates = [{"title": "ДЗ 4. Графовые сети", "url": URL4}, {"title": "ДЗ 5. Соревнование", "url": URL5}]
+        for answer in ("4", "ДЗ 4", "четвертую", "четвёртую", URL4):
+            self.assertEqual(selected_assignment(candidates, answer)["url"], URL4)
+        self.assertIsNone(selected_assignment(candidates, "1"))
+        self.assertIsNone(selected_assignment(candidates, "через 4 часа"))
+        self.assertIsNone(selected_assignment([*candidates, {"title": "ДЗ 4 NLP", "url": "another"}], "4"))
 
     def test_preparation_of_same_assignment_reuses_legacy_work_instead_of_starting_over(self):
         parent = self.seed()
