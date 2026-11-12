@@ -45,5 +45,6 @@ desktop_pid=$!
 echo 'On your computer: ssh -N -L 5901:127.0.0.1:5901 YOUR_USER@YOUR_SERVER_IP'
 echo 'Then open vnc://127.0.0.1:5901 and sign in. Close the browser window when finished.'
 sudo -u di env HOME="$di_home" DISPLAY=:1 XAUTHORITY="$authfile" \
+  PATH=/opt/capri-di/node/bin:/usr/local/bin:/usr/bin:/bin \
   PLAYWRIGHT_BROWSERS_PATH=/opt/capri-di/browsers \
   node /opt/capri-di/deploy/browser-login.mjs "$source_name"

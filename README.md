@@ -48,6 +48,8 @@ sudo nano /etc/capri-di/capri.env
 Введите вручную Telegram-токен, username бота без @, ID своего private чата, OpenRouter-ключ и ID модели
 с поддержкой tools. Env — синтаксис systemd `NAME=value`, без `export`; не показывайте
 его содержимое в чатах. Установщик не запускает сервисы и не перезаписывает конфиги.
+Если системный Node.js старее 20, установщик загрузит официальный Node.js 22
+в `/opt/capri-di/node`, проверив SHA-256. Системный Node.js не заменяется.
 
 ### Вход Ди через подписку ChatGPT
 
