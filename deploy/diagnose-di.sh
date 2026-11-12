@@ -63,7 +63,7 @@ report['chatgpt_login_confirmed'] = login.returncode == 0 and 'chatgpt' in (logi
 with tempfile.TemporaryDirectory(prefix='di-probe-') as directory:
     output = Path(directory) / 'reply.txt'
     try:
-        probe = subprocess.run(['codex', 'exec', '--approve-for-me', '--sandbox', 'workspace-write',
+        probe = subprocess.run(['codex', 'exec', '--approve-for-me',
                                 '--skip-git-repo-check', '--cd', directory, '--output-last-message', str(output), '-'],
                                input='Do not call tools, browse, or modify files. Reply with exactly OK.',
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=90)

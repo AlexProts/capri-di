@@ -146,7 +146,7 @@ class CoreTests(unittest.TestCase):
         executable = root / "fake-codex"
         simulated_result = error_result("completed", "collected")
         simulated_result["collected_at"] = "2026-11-12T09:00:00+03:00"
-        executable.write_text("#!/usr/bin/env python3\nimport sys,json,os\np=json.load(sys.stdin)\nassert p['kind']=='lms'\nassert 'OPENROUTER_API_KEY' not in os.environ\nassert 'OPENAI_API_KEY' not in os.environ\na=sys.argv\nassert '--approve-for-me' in a\nassert 'never' not in a\nassert a[a.index('--sandbox')+1]=='workspace-write'\nassert '--dangerously-bypass-approvals-and-sandbox' not in a\nresult=" + repr(simulated_result) + "\nopen(a[a.index('--output-last-message')+1],'w').write(json.dumps(result))\n")
+        executable.write_text("#!/usr/bin/env python3\nimport sys,json,os\np=json.load(sys.stdin)\nassert p['kind']=='lms'\nassert 'OPENROUTER_API_KEY' not in os.environ\nassert 'OPENAI_API_KEY' not in os.environ\na=sys.argv\nassert '--approve-for-me' in a\nassert 'never' not in a\nassert '--sandbox' not in a\nassert '--dangerously-bypass-approvals-and-sandbox' not in a\nresult=" + repr(simulated_result) + "\nopen(a[a.index('--output-last-message')+1],'w').write(json.dumps(result))\n")
         executable.chmod(0o700)
         job_id = self.store.enqueue("lms", "read", "owner", "read")
         job = self.store.claim_job()

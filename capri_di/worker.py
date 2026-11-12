@@ -92,7 +92,8 @@ class Worker:
             prompt["prepared_homework"] = prior
             prompt["original_user_request"] = parent["request"]
         output = work / "result.json"
-        argv = [self.codex, "exec", "--approve-for-me", "--sandbox", "workspace-write",
+        # --approve-for-me already selects workspace-write; combining --sandbox is invalid.
+        argv = [self.codex, "exec", "--approve-for-me",
                 "--skip-git-repo-check", "--cd", str(work), "--output-schema", str(schema),
                 "--output-last-message", str(output), "-"]
         if os.environ.get("CODEX_MODEL"):
