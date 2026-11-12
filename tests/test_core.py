@@ -22,6 +22,10 @@ def config(root):
     return Config(Path(root), 42, "fake", "fake", "fake/model", True, True, True, (18,), 4, 10)
 
 
+def routed(tool="answer", arguments=None, reply="Поняла."):
+    return {"tool_calls": [{"id": "route", "type": "function", "function": {"name": "route_request", "arguments": json.dumps({"tool": tool, "arguments": arguments or {}, "reply": reply})}}]}
+
+
 class CoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -174,7 +178,7 @@ class CoreTests(unittest.TestCase):
 
     def test_result_report_does_not_dispatch_tasks(self):
         class Provider:
-            def chat(self, messages, tools=None):
+            def chat(self, messages, tools=None, **kwargs):
                 assert tools is None
                 return {"content": "Alex, данные собраны."}
         job_id = self.store.enqueue("lms", "read", "owner", "report")
@@ -230,7 +234,7 @@ class CoreTests(unittest.TestCase):
 
     def test_formatter_gets_only_relevant_records_and_no_legacy_summary(self):
         class Provider:
-            def chat(self, messages, tools=None):
+            def chat(self, messages, tools=None, **kwargs):
                 supplied = json.loads(messages[-1]["content"])["result"]
                 self.supplied = supplied
                 return {"content":"Сегодня сначала Agile — до 20:00."}
@@ -265,9 +269,9 @@ class CoreTests(unittest.TestCase):
         class Provider:
             def __init__(self):
                 self.messages = []
-            def chat(self, messages, tools=None):
+            def chat(self, messages, tools=None, **kwargs):
                 self.messages = messages
-                return {"content": "Ready."}
+                return routed(reply="Ready.") if tools else {"content": "Ready."}
         provider = Provider()
         capri = Capri(self.config, self.store, provider)
         capri.reply("Please keep me posted about deadlines.", 1)

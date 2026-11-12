@@ -16,7 +16,7 @@ from capri_di.main import handle_update
 from capri_di.network import RemoteError
 from capri_di.store import Store
 from capri_di.worker import Worker, error_result
-from test_core import config
+from test_core import config, routed
 
 
 class Provider:
@@ -24,9 +24,9 @@ class Provider:
         self.answer = answer
         self.calls = []
 
-    def chat(self, messages, tools=None):
+    def chat(self, messages, tools=None, **kwargs):
         self.calls.append((messages, tools))
-        return {"content": self.answer}
+        return routed(reply=self.answer) if tools else {"content": self.answer}
 
 
 class MemoryTodoTests(unittest.TestCase):
@@ -177,8 +177,8 @@ class MemoryTodoTests(unittest.TestCase):
 
     def test_natural_language_tool_creates_reminder_and_preserves_other_memories(self):
         when = (self.now + timedelta(hours=2)).isoformat()
-        calls = [{"id": "call1", "type": "function", "function": {"name": "todo", "arguments": json.dumps({"action": "add", "title": "Разобрать ДЗ", "remind_at": when, "repeat_hours": 24})}}]
-        with patch.object(self.provider, "chat", side_effect=[{"tool_calls": calls}, {"content": "Записала и напомню."}]):
+        plan = routed("todo", {"action": "add", "title": "Разобрать ДЗ", "remind_at": when, "repeat_hours": 24})
+        with patch.object(self.provider, "chat", side_effect=[plan, routed(reply="Записала и напомню.")]):
             answer = self.capri.reply("Напомни через два часа про ДЗ, потом каждые сутки", 100)
         self.assertEqual(answer, "Записала и напомню.")
         todo = Store(self.temp.name).todos()[0]

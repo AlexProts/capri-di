@@ -7,7 +7,7 @@ import unittest
 from capri_di.capri import Capri
 from capri_di.store import Store
 from capri_di.worker import Worker, copy_previous_work, error_result
-from test_core import config
+from test_core import config, routed
 
 
 class ContinuationTests(unittest.TestCase):
@@ -65,12 +65,13 @@ class ContinuationTests(unittest.TestCase):
         parent = self.parent()
         class Provider:
             calls = 0
-            def chat(self, messages, tools=None):
+            def chat(self, messages, tools=None, **kwargs):
                 self.calls += 1
                 if self.calls > 1:
                     raise AssertionError("A model must not paraphrase a queue receipt as running")
-                return {"content": "Он уже запущен под старым ID!", "tool_calls": [{"id": "dispatch", "type": "function", "function": {
-                    "name": "continue_homework", "arguments": json.dumps({"job_id": parent["id"], "request": "Поставить библиотеки и проверить, не прикреплять", "install_dependencies": True})}}]}
+                response = routed("continue_homework", {"job_id": parent["id"], "request": "Поставить библиотеки и проверить, не прикреплять", "install_dependencies": True})
+                response["content"] = "Он уже запущен под старым ID!"
+                return response
         provider = Provider()
         capri = Capri(config(self.root), self.store, provider)
         answer = capri.reply("Разрешаю поставить библиотеки, пусть доделает", 10)

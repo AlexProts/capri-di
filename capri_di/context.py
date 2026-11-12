@@ -2,7 +2,40 @@
 import json
 import re
 
-from .relevance import digest_result
+from .relevance import digest_result, relevant_record
+
+
+def study_terms(text):
+    text = text.casefold()
+    for pattern, canonical in ((r"\b(?:рек[\s-]*сис(?:ом|у|а|е)?|рексис(?:ом|у|а|е)?|recsys)\b", "рекомендательные системы"),
+                               (r"\bрекомендательн\w*\s+систем\w*", "рекомендательные системы"),
+                               (r"\b(?:прод[\s-]*мл|prodml)\b", "production ml")):
+        text = re.sub(pattern, canonical, text)
+    return {w for w in re.findall(r"[\w-]+", text) if len(w) >= 3}
+
+
+def find_assignment(store, query):
+    terms = study_terms(query)
+    found = {}
+    for job in store.jobs(100):
+        if not job["result"]:
+            continue
+        result = json.loads(job["result"])
+        if result.get("status") != "completed":
+            continue
+        for record in result.get("records", []):
+            if record.get("source") != "lms" or not relevant_record(record) or re.search(r"\b(?:тест|test)\b", record.get("title", ""), re.I):
+                continue
+            haystack = " ".join(record.get(k, "") for k in ("title", "course", "details")).casefold()
+            course_score = sum(term in record.get("course", "").casefold() for term in terms)
+            score = 10 * course_score + sum(term in haystack for term in terms)
+            url = record["url"]
+            if score and url not in found:
+                found[url] = {**record, "collected_at": result.get("collected_at", ""), "score": score}
+    matches = sorted(found.values(), key=lambda r: r["score"], reverse=True)
+    if matches and matches[0]["score"] >= 10:
+        matches = [r for r in matches if r["score"] >= 10]
+    return matches[:8]
 
 
 def bounded_history(store, budget=16000):
@@ -79,6 +112,7 @@ def delegation_context(store, request):
     # Preferences are for Capri; Di only needs the concrete task and study references.
     return {"recent_conversation": bounded_history(store, 6000)[-8:],
             "latest_owner_message": next((r["content"] for r in reversed(store.history()) if r["role"] == "user"), ""),
+            "pending_owner_request": json.loads(store.setting("pending_workflow", "{}")),
             "older_conversation_summary": store.setting("conversation_summary")[:3000],
             "last_delivered_report": store.recent_reports()[-1:],
             "matching_past_jobs": recall(store, request)}
